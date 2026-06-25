@@ -1,11 +1,11 @@
-# ICU Septic Shock Monitor — Prototipe CDSS (v3)
+# Prototipe CDSS - Monitoring Risiko Syok Septik di ICU
 
-Sistem Pendukung Keputusan untuk Pemantauan Risiko Septic Shock pada pasien ICU.
+Sistem Pendukung Keputusan untuk Pemantauan Risiko Syok Septik pada pasien Sepsis di ICU.
 Skripsi S1 Computer Science · Bina Nusantara University.
 
-> **Peringatan:** Prototipe penelitian. Bukan alat diagnostik klinis. Keputusan medis tetap pada tenaga medis.
+> **Peringatan:** Prototipe penelitian. Bukan alat diagnostik klinis.
 
-## Fitur Utama (v3)
+## Fitur Utama
 
 - **Multi-pasien dalam 1 file Excel** — efisien untuk klinisi yang memantau beberapa pasien sekaligus
 - **Workflow 4-langkah Polytron-style:** Unggah → Validasi → Tinjau Data → Hasil Prediksi
