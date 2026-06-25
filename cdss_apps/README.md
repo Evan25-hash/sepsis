@@ -72,14 +72,3 @@ Tapi setiap kolom harus punya minimal 1 nilai pengukuran.
    ├── Single pasien: langsung ke dashboard detail
    └── Dashboard: tren risiko + kondisi pasien + faktor utama
 ```
-
-## Tentang Sistem
-
-Model AI dilatih pada data lebih dari 4,700 pasien ICU dari basis data MIMIC-IV.
-Performa terbaik untuk prediksi dalam 6 jam ke depan; akurasi menurun untuk
-prediksi window yang lebih jauh.
-
-## Citation
-
-Evan Kurniady. *Prediksi Septic Shock pada Pasien Sepsis ICU Menggunakan Deep Learning Time Series.*
-Bina Nusantara University · 2025.
