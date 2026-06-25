@@ -1,5 +1,4 @@
-# Prediksi Dini Syok Septik pada Pasien Sepsis di ICU Menggunakan Model *Deep Learning* *Time-Series*
-
+# Prediksi Dini Progresi Syok Septik pada Pasien Sepsis di ICU Menggunakan *Deep Learning* Berbasis Deret Waktu
 Repositori ini berisi seluruh artefak teknis dari penelitian prediksi dini syok septik berbasis *deep learning* pada dataset MIMIC-IV v3.1. Pipeline dibagi menjadi tiga bagian utama: konstruksi data via BigQuery SQL, pelatihan dan evaluasi model Python, serta prototipe aplikasi CDSS berbasis Streamlit.
 
 ---
