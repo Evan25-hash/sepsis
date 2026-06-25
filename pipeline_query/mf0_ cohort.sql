@@ -1,70 +1,6 @@
 -- ============================================================
--- M0: COHORT SELECTION
--- Dataset: MIMIC-IV v3.1
--- Project: skripsi-sepsis-488003.sepsis_v3
---
--- Kriteria inklusi:
---   I1. Dewasa >= 18 tahun (Singer et al., 2016)
---   I2. First ICU stay only
---       Rasional: mencegah dependensi antar-stay dari pasien
---       yang sama (data leakage antar train/test split bila
---       satu pasien punya >1 stay). Mengikuti praktik
---       subject-level separation (Harutyunyan et al., 2019).
---   I3. Confirmed Sepsis-3 via derived.sepsis3
---       (Johnson et al., 2023 - MIMIC-Code)
---   I4. MICU + SICU only
---       Rasional: fokus pada unit medical/surgical; cardiac
---       dan neuro ICU dieksklusi karena profil shock dan
---       populasi pasiennya berbeda secara sistematis.
---
--- Kriteria eksklusi:
---   E1. Non-septic shock ICD
---       (kardiogenik, hipovolemik, anafilaktik, other shock)
---       Catatan: septic shock (ICD-10 R65.21 / ICD-9 78552)
---       TIDAK termasuk daftar ini — septic shock punya kode
---       terpisah dan tidak akan terbuang oleh filter E1.
---   E2. Semua documented treatment limitation:
---       DNR, DNI, DNR/DNI, Comfort Measures Only
---       Rasional: ketiadaan atau pembatasan intervensi
---       mencerminkan keputusan klinis, bukan fisiologi --
---       label has_shock berbasis vasopressor tidak valid
---
--- Availability filters (Kim et al., 2024 - TEW3S):
---   A1. SBP tersedia         (SOFA cardiovascular)
---   A2. DBP tersedia         (SOFA cardiovascular)
---   A3. GCS tersedia         (SOFA CNS)
---   A4. Creatinine tersedia  (SOFA renal)
---   A5. Bilirubin total      (SOFA hepatic)
---   A6. Platelet tersedia    (SOFA coagulation)
---   A7. PaO2 tersedia        (SOFA respiratory)
---   A8. FiO2 tersedia        (SOFA respiratory)
---   A9. Lactate tersedia     (shock criterion -- Singer 2016)
---
--- Ditangani di Python (bukan di M0):
---   P1. Instantaneous shock criterion (Cell 2C)
---       Mengikuti Singer et al. (2016) -- Sepsis-3 tidak
---       mendefinisikan sustained duration requirement.
---   P2. Label syok septik dengan raw intersection criterion
---       (Cell 2C): is_shock_hour bernilai TRUE bila ketiga
---       kondisi terpenuhi pada jam yang sama --
---       (a) vasopressor aktif (ned_dose > 0),
---       (b) lactate > 2.0 mmol/L (nilai mentah hasil
---           pengukuran, tanpa propagasi/LOCF),
---       (c) jam observasi > onset sepsis.
---       Penggunaan lactate mentah (bukan LOCF) mencegah
---       circular leakage pada konstruksi label.
---       (Kim et al., 2024)
---   P3. Shock-at-admission exclusion: drop shock dengan
---       onset < 4 jam (Cell 2F). Memisahkan incident shock
---       dari prevalent shock (Wardi et al., 2021).
---
--- Catatan revisi:
---   Kriteria minimum ICU LOS dihapus. Penelitian ini
---   memprediksi syok septik secara prospektif tanpa
---   mensyaratkan durasi rawat minimum; pasien dengan
---   trajektori pendek tetap disertakan.
+-- mf0_ cohort.sql (Seleksi Kohort)
 -- ============================================================
-
 CREATE OR REPLACE TABLE `skripsi-sepsis-488003.sepsis_v3.cohort` AS
 
 WITH
@@ -288,13 +224,24 @@ cohort_final AS (
           AND vs.charttime > b.icu_intime AND vs.charttime <= b.effective_outtime
       )
     )
-    -- A9: Lactate (shock criterion -- Singer 2016)
-    AND EXISTS (
-      SELECT 1 FROM `physionet-data.mimiciv_3_1_derived.bg` bg
-      WHERE bg.hadm_id = b.hadm_id AND bg.lactate IS NOT NULL
+    -- list 9: lactate
+    AND
+    EXISTS (
+      SELECT 
+        1 
+      FROM 
+        `physionet-data.mimiciv_3_1_derived.bg` bg
+      WHERE 
+        bg.hadm_id = b.hadm_id AND bg.lactate IS NOT NULL
         AND bg.charttime > b.icu_intime AND bg.charttime <= b.effective_outtime
     )
 )
+SELECT 
+  * 
+FROM 
+  cohort_final
+ORDER BY 
+  stay_id;
 
-SELECT * FROM cohort_final
-ORDER BY stay_id;
+
+
