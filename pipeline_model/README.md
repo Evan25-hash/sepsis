@@ -16,7 +16,7 @@ pip install torch pandas numpy scikit-learn captum plotly openpyxl
 | 2B–2C | Konstruksi label | `has_shock` (biner per pasien), `t_shock_onset` (jam pertama syok) |
 | 2D | Eksklusi onset dini | Hapus stays dengan onset < 4 jam |
 | 3A–3D | Seleksi fitur | Kruskal-Wallis η², *distance correlation*, mRMR *greedy* + BH-FDR → 21 fitur |
-| 4B | Imputasi | ffill/bfill per stay |
+| 4B | Imputasi | interpolasi linear/ffill/bfill per stay |
 | 5A | Split & normalisasi | Subject-level stratified 70/15/15; StandardScaler fit pada train |
 | 5B | Bangun sekuen | *Framing B* (PSP): growing window, K_SHOCK=20, K_NONSHOCK=15, λ=0.05 |
 | 6A | Pelatihan GRU | Hidden=32, layers=2, dropout=0.4 |
