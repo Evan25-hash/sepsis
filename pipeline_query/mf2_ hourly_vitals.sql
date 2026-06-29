@@ -1,37 +1,24 @@
 -- ============================================================
--- M2: HOURLY VITALS
--- Dataset: MIMIC-IV v3.1
---
--- Agregasi: LAST NON-NULL VALUE per kolom per jam
---   Bashiri et al. (2022, JAMIA) menggunakan strategi last value
---   untuk agregasi time-series ICU pada tugas prediksi infeksi.
---   Untuk source table multi-column (derived.vitalsign), agregasi
---   dilakukan per-kolom dengan ARRAY_AGG IGNORE NULLS untuk
---   mempertahankan measurement individual yang valid. Strategi
---   per-row last-value drop measurement valid ketika row last
---   charttime punya NULL di kolom tersebut sementara row earlier
---   punya nilai.
---
--- Window: (starttime, endtime] — LEFT OPEN, RIGHT CLOSED
---   Identik dengan MIMIC-Code sofa.sql (Johnson et al., 2023)
---
--- Catatan tentang sbp/dbp/map di derived.vitalsign:
---   Kolom sbp/dbp/mbp adalah AVG semua itemid yang masuk dalam
---   satu charttime, mencakup invasive (arterial line: 220050/
---   220051/220052, 225309/225310/225312) dan non-invasive (cuff:
---   220179/220180/220181) sekaligus. Tidak ada kolom
---   invasive-only — pada pasien tanpa arterial line, sbp == sbp_ni.
---
--- Kolom output:
---   heart_rate, sbp, dbp, map    — vital signs utama
---   resp_rate, temperature, spo2 — vital signs lain
---   glucose_poc                  — glucose point-of-care
+-- mf2_ hourly_vitals.sql (Tanda Vital per Jam)
 -- ============================================================
 
+-- agregasi: last non-null value per kolom per jam
+-- pakai ARRAY_AGG IGNORE NULLS ORDER BY charttime DESC
+-- bukan last-row approach, karena row terakhir dalam jam
+-- bisa saja NULL di kolom tertentu padahal row sebelumnya ada nilainya
+-- → per-kolom lebih aman
+
+-- soal sbp/dbp/map di derived.vitalsign:
+-- kolom ini sudah AVG dari semua itemid yang masuk charttime yang sama,
+-- mencakup invasive (arterial line) dan non-invasive (cuff) sekaligus
+-- tidak ada pemisahan invasive-only di sini
+-- kalau pasien tidak punya arterial line, sbp == sbp_ni (tidak ada bedanya)
+
 CREATE OR REPLACE TABLE `skripsi-sepsis-488003.sepsis_v3.hourly_vitals`
+  
 CLUSTER BY stay_id, hr
 AS
-
+  
 SELECT
   b.stay_id,
   b.hr,
@@ -43,9 +30,12 @@ SELECT
   ARRAY_AGG(v.temperature IGNORE NULLS ORDER BY v.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS temperature,
   ARRAY_AGG(v.spo2        IGNORE NULLS ORDER BY v.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS spo2,
   ARRAY_AGG(v.glucose     IGNORE NULLS ORDER BY v.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS glucose_poc
-FROM `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
-LEFT JOIN `physionet-data.mimiciv_3_1_derived.vitalsign` v
+FROM 
+  `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
+LEFT JOIN 
+  `physionet-data.mimiciv_3_1_derived.vitalsign` v 
   ON  v.stay_id   =  b.stay_id
   AND v.charttime >  b.starttime
   AND v.charttime <= b.endtime
-GROUP BY b.stay_id, b.hr;
+GROUP BY
+  b.stay_id, b.hr;
