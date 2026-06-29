@@ -23,15 +23,3 @@ M0 -> M1 -> M2, M3, M4, M5, M6, M7 (paralel) -> M8
 | `mf6__static_features.sql` | Fitur statis per stay | Usia, jenis kelamin, berat badan |
 | `mf7__hourly_vasopressor.sql` | Status vasopressor per jam | Flag aktif/tidak aktif |
 | `mf8__sepsis_hourly_dataset.sql` | Penggabungan final | Dataset lengkap siap pakai |
-
-## Teknik Agregasi
-
-Setiap pengukuran lab atau vital dicatat ke jam H jika 
-charttime-nya jatuh setelah jam H-1 dan paling lambat 
-akhir jam H
-
-```sql
-charttime > b.starttime AND charttime <= b.endtime
-```
-
-Setiap pengukuran masuk ke tepat satu window jam.
