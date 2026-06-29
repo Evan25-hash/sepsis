@@ -24,15 +24,7 @@ M0 -> M1 -> M2, M3, M4, M5, M6, M7 (paralel) -> M8
 | `mf7__hourly_vasopressor.sql` | Status vasopressor per jam | Flag aktif/tidak aktif |
 | `mf8__sepsis_hourly_dataset.sql` | Penggabungan final | Dataset lengkap siap pakai |
 
-## Kriteria Kohort (M0)
-
-**Inklusi:** usia ≥ 18 tahun, kunjungan ICU pertama, Sepsis-3 terkonfirmasi (SOFA ≥ 2 + suspek infeksi), unit MICU atau SICU.
-
-**Eksklusi:** syok non-septik (anafilaktik, kardiogenik), status DNR/DNI/CMO, stays dengan nilai permanen *missing* setelah imputasi, onset syok < 4 jam dari masuk ICU.
-
-**Kohort final:** 4.626 ICU stay — 1.046 syok (22,6%), 3.580 non-syok — total 906.989 baris jam.
-
-## Konvensi Agregasi
+## Teknik Agregasi
 
 Setiap pengukuran lab atau vital dicatat ke jam H jika 
 charttime-nya jatuh setelah jam H-1 dan paling lambat 
