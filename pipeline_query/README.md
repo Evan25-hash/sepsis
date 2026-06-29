@@ -7,7 +7,7 @@ Konstruksi dataset dilakukan secara bertahap menggunakan Google BigQuery pada MI
 M2–M7 dapat dijalankan paralel setelah M1 selesai.
 
 ```
-M0 → M1 → M2, M3, M4, M5, M6, M7 (paralel) → M8
+M0 -> M1 -> M2, M3, M4, M5, M6, M7 (paralel) -> M8
 ```
 
 ## Modul
@@ -34,14 +34,12 @@ M0 → M1 → M2, M3, M4, M5, M6, M7 (paralel) → M8
 
 ## Konvensi Agregasi
 
-Semua modul M2–M7 menggunakan window **left open, right closed**:
+Setiap pengukuran lab atau vital dicatat ke jam H jika 
+charttime-nya jatuh setelah jam H-1 dan paling lambat 
+akhir jam H
 
 ```sql
 charttime > b.starttime AND charttime <= b.endtime
 ```
 
 Setiap pengukuran masuk ke tepat satu window jam.
-
-## Flowchart
-
-![Query Flowchart](../documentation/flowchart/query_flowchart.png)
