@@ -6,24 +6,36 @@ CREATE OR REPLACE TABLE `skripsi-sepsis-488003.sepsis_v3.cohort` AS
 WITH
 
 -- eksklusi dulu sebelum join besar
-  
--- E1: buang pasien yang punya diagnosis shock NON-septic
--- masalahnya: kardiogenik/hipovolemik/anafilaktik punya pola
--- MAP rendah + vasopressor + laktat tinggi yang mirip banget
--- sama septic shock → noise di label
 
--- yang penting: septic shock (R65.21 / ICD-9 78552) tidak ada di list ini, jadi pasien syok septik aman, tidak ikut kebuang
-
--- ICD-10: R570 cardiogenic, R571 hypovolemic,
+-- ===========================================================================================================================
+-- EKSKLUSI 1: PASIEN YANG PUNYA DIAGNOSIS SYOK NON-SEPTIK
+-- ===========================================================================================================================
+--masalahnya: kardiogenik/hipovolemik/anafilaktik punya pola
+--MAP rendah + vasopressor + laktat tinggi yang mirip dengan syok septik (bisa menyebabkan label noise)
+--note penting: septic shock (R65.21 / ICD-9 78552) tidak ada di list ini, jadi pasien syok septik tidak ikut tereksklusi
+--ICD-10: R570 cardiogenic, R571 hypovolemic,
 --         R578 other (neurogenik dll), R579 unspecified
 --         T782* dan T886* = anaphylactic (regex biar catch semua subtype)
--- ICD-9:  78550/78551/78559 = unspecified/cardiogenic/other
+--ICD-9:  78550/78551/78559 = unspecified/cardiogenic/other
 --         9950/9951/9952 = anaphylactic (NOS/food/drug)
+
+--Referensi:
+-- Chang, Y., Antonescu, C., Ravindranath, S., Dong, J., Lu, M., Vicario, F., et al.
+--   (2022). Early prediction of cardiogenic shock using machine learning.
+--   Frontiers in Cardiovascular Medicine, 9, 862424.
+--   doi:10.3389/fcvm.2022.862424
+-- Centers for Disease Control and Prevention. (2019). 
+--   Sepsis (ICD-10 Coordination and Maintenance Committee Meeting, March 5–6, 2019). 
+--   National Center for Health Statistics. 
+--   Retrieved from https://archive.cdc.gov/www_cdc_gov/nchs/data/icd/SEPSIS_tabular_final_dp.pdf
+  
 dx_other_shock AS (
   SELECT 
     DISTINCT hadm_id
   FROM 
-    `physionet-data.mimiciv_3_1_hosp.diagnoses_icd`
+    `physionet-data.mimiciv_3_1_hosp.diagnoses_icd` 
+-- isi tabel hosp.diagnoses_icd:
+-- subject_id, hadm_id, seq_num, icd_code, icd_version
   WHERE
     (icd_version = 10 AND icd_code IN ('R570', 'R571', 'R578', 'R579'))  OR
     (icd_version = 9  AND icd_code IN ('78550', '78551', '78559'))       OR 
@@ -31,37 +43,54 @@ dx_other_shock AS (
     (icd_version = 10 AND REGEXP_CONTAINS(icd_code, r'^T886'))           OR 
     (icd_version = 9  AND icd_code IN ('9950', '9951', '9952'))
 ),
+-- ===========================================================================================================================
 
--- E2: buang pasien DNR/DNI/CMO
--- kalau pasien punya treatment limitation, vasopressor
--- mungkin tidak diberikan bukan karena tidak perlu,
--- tapi karena keputusan klinis, label syok septik nantinya jadi tidak valid
+-- ===========================================================================================================================
+-- EKSKLUSI 2: PASIEN DENGAN LIMITASI PERAWATAN
+-- ===========================================================================================================================
+--eksklusi pasien DNR/DNI/CMO
+--batasan terapi dapat mengubah pola tata laksana dan outcome
+--kalau pasien punya treatment limitation, vasopressor mungkin tidak diberikan bukan karena tidak perlu,
+--tapi karena keputusan klinis, label syok septik nantinya jadi tidak valid
+--itemid 223758 = "Code Status" di chartevents
+  
+--Referensi:
+-- Shahn, Z., Lehman, L.-W. H., Mark, R. G., Talmor, D., & Bose, S. (2021).
+--   Delaying initiation of diuretics in critically ill patients with recent
+--   vasopressor use and high positive fluid balance. British Journal of
+--   Anaesthesia, 127(4), 569–576. doi:10.1016/j.bja.2021.04.035
+-- Shiu, S.-S., Lee, T.-T., Yeh, M.-C., Chen, Y.-C., & Huang, S.-H. (2022). The
+--   impact of signing do-not-resuscitate orders on the use of non-beneficial
+--   life-sustaining treatments for intensive care unit patients: A retrospective
+--   study. International Journal of Environmental Research and Public
+--   Health, 19(15), 9521. doi:10.3390/ijerph19159521
 
--- itemid 223758 = "Code Status" di chartevents
 code_status_excl AS (
   SELECT 
     DISTINCT stay_id
   FROM 
     `physionet-data.mimiciv_3_1_icu.chartevents`
   WHERE 
-    itemid = 223758               AND 
+    itemid = 223758 AND 
     value IN (
       'DNR (do not resuscitate)',
       'DNI (do not intubate)',
-      'DNR / DNI',
+      -- 'Full code', 
+      -- semua tindakan resusitasi diperbolehkan
       'Comfort measures only'
+      'DNR / DNI',
     )
 ),
 
--- join utama: ambil semua pasien sepsis dewasa, ICU pertama, MICU/SICU
 
--- t_sepsis_hr: jam onset sepsis relatif ke ICU admission
--- pakai GREATEST(suspected_infection_time, sofa_time) karena
--- Sepsis-3 butuh KEDUA kriteria terpenuhi bersamaan
--- COALESCE untuk handle edge case salah satu NULL
+--join utama: ambil semua pasien sepsis dewasa, ICU pertama, MICU/SICU
+--t_sepsis_hr: jam onset sepsis relatif ke ICU admission
+--pakai GREATEST(suspected_infection_time, sofa_time) karena
+--Sepsis-3 butuh KEDUA kriteria terpenuhi bersamaan
+--COALESCE untuk handle edge case salah satu NULL
+--effective_outtime = LEAST(icu_outtime, deathtime)
+--dipakai sebagai batas akhir window di availability filter bawah
 
--- effective_outtime = LEAST(icu_outtime, deathtime)
--- dipakai sebagai batas akhir window di availability filter bawah
 base AS (
   SELECT
     ic.subject_id,
@@ -90,40 +119,40 @@ base AS (
     `physionet-data.mimiciv_3_1_icu.icustays` icu 
     ON  ic.stay_id = icu.stay_id
 
-  -- INNER JOIN ke sepsis3 + filter sepsis3=TRUE
-  -- tanpa ini, pasien yang cuma memenuhi salah satu kriteria
-  -- (SOFA >= 2 tapi belum ada suspek infeksi, atau sebaliknya)
-  -- bisa ikut masuk
+--INNER JOIN ke sepsis3 + filter sepsis3=TRUE
+-- tanpa ini, pasien yang cuma memenuhi salah satu kriteria
+-- (SOFA >= 2 tapi belum ada suspek infeksi, atau sebaliknya) bisa ikut masuk
   INNER JOIN 
     `physionet-data.mimiciv_3_1_derived.sepsis3` s3 
     ON  ic.stay_id = s3.stay_id AND 
         s3.sepsis3 = TRUE
-
   LEFT JOIN `physionet-data.mimiciv_3_1_hosp.admissions` ad
     ON ic.hadm_id = ad.hadm_id
-
   WHERE
     ic.admission_age >= 18                                      AND
     ic.first_icu_stay = TRUE                                    AND
+
+    --inklusi jenis ICU
     icu.first_careunit IN (
       'Medical Intensive Care Unit (MICU)',
       'Surgical Intensive Care Unit (SICU)',
       'Medical/Surgical Intensive Care Unit (MICU/SICU)'
     )                                                           AND
+    
+    --ekskklusi syok non septik dan pembatasan terapi
     ic.hadm_id NOT IN (SELECT hadm_id FROM dx_other_shock)      AND 
     ic.stay_id NOT IN (SELECT stay_id FROM code_status_excl)
 ),
 
--- availability filter: pastikan setiap pasien punya minimal 1 pengukuran untuk tiap komponen SOFA selama stay-nya
-
--- window sama seperti M1-M8: charttime > icu_intime (left open)
--- dan charttime <= effective_outtime (right closed)
+--availability filter: pastikan setiap pasien punya minimal 1 pengukuran untuk tiap komponen SOFA selama perawatan di ICU
+--window sama seperti M1-M8: charttime > icu_intime (left open)
+--dan charttime <= effective_outtime (right closed)
+  
 cohort_final AS (
   SELECT 
     b.*
   FROM 
     base b
-  
   WHERE
     -- A1-A2: SBP + DBP, keduanya wajib ada (SOFA cardiovascular)
     EXISTS (
@@ -180,7 +209,7 @@ cohort_final AS (
           AND vs.charttime > b.icu_intime AND vs.charttime <= b.effective_outtime
       )
     )
-    -- A9: laktat wajib ada, ini kriteria shock Singer 2016
+    -- A9: laktat wajib ada, ini kriteria syok septik menurut Singer et. al (2016)
     AND EXISTS (
       SELECT 1 FROM `physionet-data.mimiciv_3_1_derived.bg` bg
       WHERE bg.hadm_id = b.hadm_id AND bg.lactate IS NOT NULL
