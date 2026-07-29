@@ -18,7 +18,7 @@ cohort_guarded AS (
     hadm_id,
     icu_intime,
     effective_outtime,
-    t_sepsis_hr AS _label_t_sepsis_hr  -- jangan pakai ini sebagai fitur model
+    t_sepsis_hr AS _label_t_sepsis_hr  --jangan pakai ini sebagai fitur model
   FROM
     `skripsi-sepsis-488003.sepsis_v3.cohort`
   WHERE 
