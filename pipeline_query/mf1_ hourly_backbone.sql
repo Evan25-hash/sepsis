@@ -1,5 +1,7 @@
 -- ============================================================
--- mf1_ hourly_backbone.sql (grid jam per rawatan / stay)
+-- mf1_hourly_backbone.sql
+--membuat backbone data per jam untuk setiap rawatan/stay ICU
+--satu baris = satu interval waktu (1 jam)
 -- ============================================================
 CREATE OR REPLACE TABLE `skripsi-sepsis-488003.sepsis_v3.hourly_backbone`
 CLUSTER BY stay_id, hr
@@ -7,10 +9,8 @@ AS
 
 WITH
 
--- guard dulu sebelum GENERATE_ARRAY
--- kalau durasi stay <= 0 menit, GENERATE_ARRAY(0, negative)
--- hasilnya empty array → row hilang diam-diam waktu UNNEST
--- sejak minimum LOS dihapus dari M0, ini bisa kejadian
+--pastikan hanya ICU stay dengan durasi > 0 menit yang diproses
+--jika tidak, GENERATE_ARRAY() akan menghasilkan array kosong sehingga stay tersebut hilang saat UNNEST
 cohort_guarded AS (
   SELECT
     stay_id,
@@ -18,20 +18,22 @@ cohort_guarded AS (
     hadm_id,
     icu_intime,
     effective_outtime,
-    t_sepsis_hr AS _label_t_sepsis_hr  --jangan pakai ini sebagai fitur model
+    t_sepsis_hr AS _label_t_sepsis_hr  --disimpan sebagai label, bukan fitur model
   FROM
     `skripsi-sepsis-488003.sepsis_v3.cohort`
-  WHERE 
+  WHERE
+  --DATETIME_DIFF() menghitung selisih waktu antara:
+  --   1. effective_outtime = waktu keluar ICU (atau waktu kematian jika lebih dulu)
+  --   2. icu_intime = waktu masuk ICU
     DATETIME_DIFF(effective_outtime, icu_intime, MINUTE) > 0
 ),
 
--- generate index jam per stay, mulai dari hr=0
--- hr=0 = jam pertama sejak ICU admission (t0 = icu_intime)
--- FLOOR(LOS_minutes/60) = index jam terakhir yang starttime-nya
--- masih dalam window → partial last hour ikut masuk, zero-length dibuang nanti
+--GENERATE_ARRAY() membuat daftar nomor jam dari 0 sampai jam terakhir.
+--contoh:
+--   LOS = 3,5 jam -> [0,1,2,3]
+--   LOS = 5,0 jam -> [0,1,2,3,4,5]
 
--- contoh: LOS=136.3h → hrs=[0..136], last hour sekitar 18 menit
---         LOS=136.0h → hrs=[0..136], last hour 0 menit → kena filter bawah
+--setiap angka nantinya menjadi satu window waktu.
 grid AS (
   SELECT
     *,
@@ -43,12 +45,26 @@ grid AS (
         ) AS INT64
       )
     ) AS hrs
-  FROM 
+  FROM
     cohort_guarded
 ),
 
--- expand ke satu baris per stay_id × hr
--- endtime di-cap ke effective_outtime supaya tidak overshoot discharge/death
+-- UNNEST() mengubah array hrs menjadi beberapa baris.
+--
+--before:
+--   stay_id = 1001
+--   hrs = [0,1,2]
+
+--sesudah:
+--   stay_id | hr
+--   1001    | 0
+--   1001    | 1
+--   1001    | 2
+
+-- CROSS JOIN memasangkan setiap nilai hr dengan stay yang sama.
+-- starttime = awal window
+-- endtime = akhir window
+-- LEAST() memastikan endtime tidak melewati discharge/death.
 expanded AS (
   SELECT
     g.subject_id,
@@ -58,20 +74,28 @@ expanded AS (
     g.icu_intime,
     g.effective_outtime,
     g._label_t_sepsis_hr,
-    DATETIME_ADD(g.icu_intime, INTERVAL hr HOUR)      AS starttime,
-    
+
+    DATETIME_ADD(
+      g.icu_intime,
+      INTERVAL hr HOUR
+    ) AS starttime,
+
     LEAST(
-      DATETIME_ADD(g.icu_intime, INTERVAL hr + 1 HOUR),
+      DATETIME_ADD(
+        g.icu_intime,
+        INTERVAL hr + 1 HOUR
+      ),
       g.effective_outtime
-    )                                                  AS endtime
-  FROM 
+    ) AS endtime
+
+  FROM
     grid g
   CROSS JOIN UNNEST(g.hrs) AS hr
 )
 
--- filter ganda: starttime harus sebelum discharge,
--- dan window harus punya durasi > 0 menit
--- (ini yang buang zero-length last hour dari contoh LOS=136.0h di atas)
+--hanya simpan window yang valid.
+-- starttime harus sebelum ICU stay berakhir
+-- dan durasi window harus lebih dari 0 menit.
 SELECT
   subject_id,
   hadm_id,
@@ -82,10 +106,12 @@ SELECT
   _label_t_sepsis_hr,
   starttime,
   endtime
-FROM 
+FROM
   expanded
-WHERE 
-  starttime < effective_outtime AND 
+WHERE
+  starttime < effective_outtime AND
   DATETIME_DIFF(
-    endtime, 
-    starttime, MINUTE) > 0;
+    endtime,
+    starttime,
+    MINUTE
+  ) > 0;
