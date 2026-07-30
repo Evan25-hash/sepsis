@@ -1,5 +1,5 @@
 -- ============================================================
--- mf1_ hourly_backbone.sql (Grid Jam per Stay)
+-- mf1_ hourly_backbone.sql (grid jam per rawatan / stay)
 -- ============================================================
 CREATE OR REPLACE TABLE `skripsi-sepsis-488003.sepsis_v3.hourly_backbone`
 CLUSTER BY stay_id, hr
