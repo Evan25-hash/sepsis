@@ -1,72 +1,27 @@
 -- ============================================================
--- M3: HOURLY LABS — v7 (FiO2 multi-source fallback)
--- Dataset: MIMIC-IV v3.1
---
--- Agregasi: LAST NON-NULL VALUE per kolom per jam
---   Bashiri et al. (2022, JAMIA) menggunakan strategi last value
---   untuk agregasi time-series ICU pada tugas prediksi infeksi.
---   Untuk source table multi-column (chemistry, complete_blood_count,
---   blood_differential, coagulation, enzyme, bg, inflammation,
---   cardiac_marker), agregasi dilakukan per-kolom dengan ARRAY_AGG
---   IGNORE NULLS untuk mempertahankan measurement individual yang
---   valid. Strategi per-row last-value drop measurement valid
---   ketika row last charttime punya NULL di kolom tersebut
---   sementara row earlier punya nilai.
---
--- Window: (starttime, endtime] — LEFT OPEN, RIGHT CLOSED
---   Identik dengan MIMIC-Code sofa.sql (Johnson et al., 2023)
---
--- Catatan elektrolit overlap chemistry vs bg:
---   bicarbonate, calcium, chloride, glucose, sodium, potassium
---   tersedia di kedua tabel. COALESCE chemistry > bg karena
---   central lab lebih standar dibanding ABG specimen.
---
--- Justifikasi kolom:
---   rdw, mcv      : SHAP top-3 septic shock ML (Hou 2021, Liu 2024)
---   monocytes     : NMLR/MLR signal (Guo 2023, Shi 2024 MIMIC-IV)
---   eosinophils   : eosinopenia marker sepsis (Abidi 2008)
---   basophils     : moderate evidence (Ying 2023 MIMIC-IV)
---   metamyelocytes: immature granulocyte marker stress/infeksi
---   nrbc          : nucleated RBC, marker stres sumsum tulang
---   ld_ldh        : 3 MIMIC-IV studies (Zeng 2025, Lu 2024, Wang 2024)
---   aado2         : Wang 2023 MIMIC-IV n=18,933
---   crp           : inflammatory marker
---   troponin_t    : cardiac injury marker
---   ntprobnp      : cardiac stress marker
---
--- ────────────────────────────────────────────────────────────
--- v7 PERUBAHAN: FiO2 MULTI-SOURCE FALLBACK
--- ────────────────────────────────────────────────────────────
--- Akar masalah v6: fio2 di-aggregate HANYA dari bg.* (LABEVENTS
---   itemid 50816 + bg.fio2_chartevents yang lookback dari BGA).
---   Pasien yang ventilated tapi tidak punya BGA akan kehilangan
---   fio2 di mf3 meskipun fio2 tercatat di ventilator_setting.
---
--- Audit diagnostic (220 stays via Layer 2 only) konfirmasi:
---   - mf0 A8 OR-filter sudah benar (Missing ALL sources = 0)
---   - Gap v6 = mf3 v6 tidak include ventilator_setting standalone
---
--- v7 menambahkan vent CTE (ventilator_setting.fio2) sebagai
---   sumber INDEPENDENT, lalu COALESCE dalam dua layer:
---
---   Layer 1: bg.fio2 + bg.fio2_chartevents
---            (paling spesifik — diukur saat/dekat BGA sampling,
---             4,822/5,042 stays = 95.6%)
---   Layer 2: ventilator_setting.fio2
---            (CHARTEVENTS 223835 standalone — untuk 220 stays
---             ventilated tanpa BGA)
---
--- Cohort filter mf0 A8 (TEW3S, Kim et al. 2024) sudah menjamin
---   setiap stay punya ≥1 fio2 measurement di salah satu sumber.
---   Audit menunjukkan 0 stays missing fio2 di ALL sources, sehingga
---   COALESCE Layer 1 + Layer 2 akan menjamin stay_cov 100% post v7.
---
--- Hourly gaps (jam tanpa measurement) di-handle di Cell 4B pipeline
---   Python via ffill/bfill — propagate measured value lebih akurat
---   secara klinis dibanding static default.
---
--- Coverage dan redundansi dianalisis di Python (mRMR pipeline)
+-- mf3_hourly_labs.sql
+--mengambil hasil pemeriksaan laboratorium per jam
+--satu baris = satu ICU stay pada satu window waktu (1 jam)
 -- ============================================================
+
+-- nilai yang digunakan adalah hasil pemeriksaan terakhir yg tersedia di dlm setiap window
+
+-- ARRAY_AGG(... ORDER BY charttime DESC LIMIT 1) mengambil hasil pemeriksaan terakhir
+-- IGNORE NULLS melewati nilai NULL, sehingga jika pemeriksaan terakhir NULL tetapi sebelumnya ada nilai, nilai sebelumnya tetap digunakan
+-- SAFE_OFFSET(0) mengambil elemen pertama hasil ARRAY_AGG(), jika tidak ada data pada window tersebut, hasilnya menjadi NULL (tidak error)
+
+-- semua tabel menggunakan window waktu: (starttime, endtime]
+-- artinya:
+--   charttime > starttime
+--   charttime <= endtime
+
+-- dengan cara ini, setiap pengukuran hanya masuk ke satu window dan tidak terhitung dua kali
+
+-- Beberapa parameter tersedia di lebih dari satu tabel
+-- (misalnya sodium, potassium, bicarbonate, calcium,
+-- chloride, glucose, dan FiO2).
+-- Pada tahap akhir digunakan COALESCE() untuk memilih
+-- sumber data yang diprioritaskan.
 
 CREATE OR REPLACE TABLE `skripsi-sepsis-488003.sepsis_v3.hourly_labs`
 CLUSTER BY stay_id, hr
@@ -74,10 +29,12 @@ AS
 
 WITH
 
--- ── Chemistry ──
+-- chemistry (kimia darah)
 chem AS (
   SELECT
-    b.stay_id, b.hr,
+    b.stay_id, 
+    b.hr,
+    
     ARRAY_AGG(ROUND(ch.albumin,       1) IGNORE NULLS ORDER BY ch.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS albumin,
     ARRAY_AGG(ROUND(ch.globulin,      1) IGNORE NULLS ORDER BY ch.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS globulin,
     ARRAY_AGG(ROUND(ch.total_protein, 1) IGNORE NULLS ORDER BY ch.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS total_protein,
@@ -90,18 +47,24 @@ chem AS (
     ARRAY_AGG(ROUND(ch.glucose,       1) IGNORE NULLS ORDER BY ch.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS glucose_chem,
     ARRAY_AGG(ROUND(ch.sodium,        1) IGNORE NULLS ORDER BY ch.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS sodium_chem,
     ARRAY_AGG(ROUND(ch.potassium,     1) IGNORE NULLS ORDER BY ch.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS potassium_chem
-  FROM `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
-  LEFT JOIN `physionet-data.mimiciv_3_1_derived.chemistry` ch
+  FROM
+    `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
+  LEFT JOIN 
+    `physionet-data.mimiciv_3_1_derived.chemistry` ch
     ON  ch.hadm_id   =  b.hadm_id
     AND ch.charttime >  b.starttime
     AND ch.charttime <= b.endtime
-  GROUP BY b.stay_id, b.hr
+  GROUP BY 
+    b.stay_id, 
+    b.hr
 ),
 
--- ── Complete Blood Count ──
+-- complete blood count (pemeriksaan darah lengkap)
 cbc AS (
   SELECT
-    b.stay_id, b.hr,
+    b.stay_id,
+    b.hr,
+    
     ARRAY_AGG(ROUND(cb.hematocrit, 1) IGNORE NULLS ORDER BY cb.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS hematocrit,
     ARRAY_AGG(ROUND(cb.hemoglobin, 1) IGNORE NULLS ORDER BY cb.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS hemoglobin,
     ARRAY_AGG(ROUND(cb.platelet,   0) IGNORE NULLS ORDER BY cb.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS platelet,
@@ -112,15 +75,19 @@ cbc AS (
     ARRAY_AGG(ROUND(cb.mch,        1) IGNORE NULLS ORDER BY cb.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS mch,
     ARRAY_AGG(ROUND(cb.mchc,       1) IGNORE NULLS ORDER BY cb.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS mchc,
     ARRAY_AGG(ROUND(cb.rbc,        2) IGNORE NULLS ORDER BY cb.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS rbc
-  FROM `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
-  LEFT JOIN `physionet-data.mimiciv_3_1_derived.complete_blood_count` cb
+  FROM 
+    `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
+  LEFT JOIN 
+    `physionet-data.mimiciv_3_1_derived.complete_blood_count` cb
     ON  cb.hadm_id   =  b.hadm_id
     AND cb.charttime >  b.starttime
     AND cb.charttime <= b.endtime
-  GROUP BY b.stay_id, b.hr
+  GROUP BY 
+    b.stay_id, 
+    b.hr
 ),
 
--- ── Blood Differential ──
+-- Blood differential (jumlah dan persentase jenis sel darah putih)
 diff AS (
   SELECT
     b.stay_id, b.hr,
@@ -142,28 +109,34 @@ diff AS (
   GROUP BY b.stay_id, b.hr
 ),
 
--- ── Coagulation ──
+-- koagulasi (pembekuan darah)
 coag AS (
   SELECT
-    b.stay_id, b.hr,
+    b.stay_id, 
+    b.hr,
     ARRAY_AGG(ROUND(cg.inr,        1) IGNORE NULLS ORDER BY cg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS inr,
     ARRAY_AGG(ROUND(cg.pt,         1) IGNORE NULLS ORDER BY cg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS pt,
     ARRAY_AGG(ROUND(cg.ptt,        1) IGNORE NULLS ORDER BY cg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS ptt,
     ARRAY_AGG(ROUND(cg.d_dimer,    1) IGNORE NULLS ORDER BY cg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS d_dimer,
     ARRAY_AGG(ROUND(cg.fibrinogen, 1) IGNORE NULLS ORDER BY cg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS fibrinogen,
     ARRAY_AGG(ROUND(cg.thrombin,   1) IGNORE NULLS ORDER BY cg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS thrombin
-  FROM `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
-  LEFT JOIN `physionet-data.mimiciv_3_1_derived.coagulation` cg
+  FROM
+    `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
+  LEFT JOIN 
+    `physionet-data.mimiciv_3_1_derived.coagulation` cg
     ON  cg.hadm_id   =  b.hadm_id
     AND cg.charttime >  b.starttime
     AND cg.charttime <= b.endtime
-  GROUP BY b.stay_id, b.hr
+  GROUP BY 
+    b.stay_id, 
+    b.hr
 ),
 
--- ── Enzymes ──
+-- enzim (pemeriksaan enzim darah)
 enz AS (
   SELECT
-    b.stay_id, b.hr,
+    b.stay_id,
+    b.hr,
     ARRAY_AGG(ROUND(en.ast,                1) IGNORE NULLS ORDER BY en.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS ast,
     ARRAY_AGG(ROUND(en.alt,                1) IGNORE NULLS ORDER BY en.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS alt,
     ARRAY_AGG(ROUND(en.bilirubin_total,    1) IGNORE NULLS ORDER BY en.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS bilirubin,
@@ -175,18 +148,24 @@ enz AS (
     ARRAY_AGG(ROUND(en.amylase,            1) IGNORE NULLS ORDER BY en.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS amylase,
     ARRAY_AGG(ROUND(en.ck_cpk,             1) IGNORE NULLS ORDER BY en.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS ck_cpk,
     ARRAY_AGG(ROUND(en.ck_mb,              1) IGNORE NULLS ORDER BY en.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS ck_mb_enzyme
-  FROM `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
-  LEFT JOIN `physionet-data.mimiciv_3_1_derived.enzyme` en
+  FROM 
+    `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
+  LEFT JOIN 
+    `physionet-data.mimiciv_3_1_derived.enzyme` en
     ON  en.hadm_id   =  b.hadm_id
     AND en.charttime >  b.starttime
     AND en.charttime <= b.endtime
-  GROUP BY b.stay_id, b.hr
+  
+  GROUP BY 
+    b.stay_id, 
+    b.hr
 ),
 
--- ── ABG / Blood Gas (sumber Layer 1 fio2) ──
+-- ABG (Arterial Blood Gas) / gas darah arteri (sumber Layer 1 fio2) ──
 abg AS (
   SELECT
     b.stay_id, b.hr,
+    
     ARRAY_AGG(ROUND(bg.lactate,                             1) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS lactate,
     ARRAY_AGG(ROUND(bg.ph,                                  2) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS ph,
     ARRAY_AGG(ROUND(bg.pco2,                                1) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS pco2,
@@ -194,42 +173,62 @@ abg AS (
     ARRAY_AGG(ROUND(bg.so2,                                 1) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS so2,
     ARRAY_AGG(ROUND(bg.baseexcess,                          1) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS baseexcess,
     ARRAY_AGG(ROUND(bg.pao2fio2ratio,                       1) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS pf_ratio,
-    -- fio2 Layer 1: dari bg (BGA charttime). COALESCE(bg.fio2,
-    -- bg.fio2_chartevents) mengikuti pola MIT-LCP sofa.sql.
-    ARRAY_AGG(ROUND(COALESCE(bg.fio2, bg.fio2_chartevents), 1) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS fio2_bg,
+    
+    -- gunakan fio2, jika kosong gunakan fio2_chartevents
+    ARRAY_AGG(
+      ROUND(
+        COALESCE(bg.fio2, bg.fio2_chartevents), 
+        1
+      ) 
+      IGNORE NULLS 
+      ORDER BY bg.charttime DESC 
+      LIMIT 1
+    )[SAFE_OFFSET(0)] AS fio2_bg,
+  
     ARRAY_AGG(ROUND(bg.totalco2,                            1) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS totalco2,
     ARRAY_AGG(ROUND(bg.aado2,                               1) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS aado2,
-    -- Elektrolit overlap dengan chemistry (untuk COALESCE di bawah)
+    
+    -- elektrolit overlap dgn chemistry (untuk COALESCE di bawah)
     ARRAY_AGG(ROUND(bg.bicarbonate, 1) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS bicarbonate_bg,
     ARRAY_AGG(ROUND(bg.calcium,     1) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS calcium_bg,
     ARRAY_AGG(ROUND(bg.chloride,    1) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS chloride_bg,
     ARRAY_AGG(ROUND(bg.glucose,     1) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS glucose_bg,
     ARRAY_AGG(ROUND(bg.sodium,      1) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS sodium_bg,
     ARRAY_AGG(ROUND(bg.potassium,   1) IGNORE NULLS ORDER BY bg.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS potassium_bg
-  FROM `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
-  LEFT JOIN `physionet-data.mimiciv_3_1_derived.bg` bg
+  FROM 
+    `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
+  LEFT JOIN 
+    `physionet-data.mimiciv_3_1_derived.bg` bg
     ON  bg.hadm_id   =  b.hadm_id
     AND bg.charttime >  b.starttime
     AND bg.charttime <= b.endtime
-  GROUP BY b.stay_id, b.hr
+  GROUP BY 
+    b.stay_id, 
+    b.hr
 ),
 
--- ── Ventilator Setting (sumber Layer 2 fio2) ──
--- Independent dari bg table — capture ventilated patients tanpa BGA
+-- ventilator Setting (sumber Layer 2 fio2) ──
+-- Independen dari bg table, capture ventilated patients tanpa BGA
 -- itemid 223835 di chartevents, sudah di-clean MIT-LCP (range 20-100)
 vent AS (
   SELECT
-    b.stay_id, b.hr,
+    b.stay_id, 
+    b.hr,
+    
     ARRAY_AGG(ROUND(vs.fio2, 1) IGNORE NULLS ORDER BY vs.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS fio2_vent
-  FROM `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
-  LEFT JOIN `physionet-data.mimiciv_3_1_derived.ventilator_setting` vs
+  FROM 
+    `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
+  LEFT JOIN 
+    `physionet-data.mimiciv_3_1_derived.ventilator_setting` vs
     ON  vs.stay_id   =  b.stay_id
     AND vs.charttime >  b.starttime
     AND vs.charttime <= b.endtime
-  GROUP BY b.stay_id, b.hr
+  GROUP BY 
+    b.stay_id, 
+    b.hr
 ),
 
--- ── Inflammation ──
+-- inflamasi, Biomarker inflamasi
 inflam AS (
   SELECT
     b.stay_id, b.hr,
@@ -242,22 +241,27 @@ inflam AS (
   GROUP BY b.stay_id, b.hr
 ),
 
--- ── Cardiac Marker ──
+-- cardiac marker, biomarker cedera dan stres jantung
 cardiac AS (
   SELECT
-    b.stay_id, b.hr,
+    b.stay_id, 
+    b.hr,
     ARRAY_AGG(ROUND(cm.troponin_t, 3) IGNORE NULLS ORDER BY cm.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS troponin_t,
     ARRAY_AGG(ROUND(cm.ntprobnp,   1) IGNORE NULLS ORDER BY cm.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS ntprobnp,
     ARRAY_AGG(ROUND(cm.ck_mb,      1) IGNORE NULLS ORDER BY cm.charttime DESC LIMIT 1)[SAFE_OFFSET(0)] AS ck_mb_cardiac
-  FROM `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
-  LEFT JOIN `physionet-data.mimiciv_3_1_derived.cardiac_marker` cm
+  FROM 
+    `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
+  LEFT JOIN 
+    `physionet-data.mimiciv_3_1_derived.cardiac_marker` cm
     ON  cm.hadm_id   =  b.hadm_id
     AND cm.charttime >  b.starttime
     AND cm.charttime <= b.endtime
-  GROUP BY b.stay_id, b.hr
+  GROUP BY 
+    b.stay_id, 
+    b.hr
 )
 
--- ── Final Assembly ──
+-- semua fitur disatukan
 SELECT
   b.stay_id,
   b.hr,
@@ -269,6 +273,9 @@ SELECT
   ch.aniongap,
   ch.bun,
   ch.creatinine,
+
+  --parameter berikut tersedia di chemistry dan blood gas.
+  -- Prioritaskan chemistry, jika kosong gunakan blood gas.
   COALESCE(ch.bicarbonate_chem, ab.bicarbonate_bg) AS bicarbonate,
   COALESCE(ch.calcium_chem,     ab.calcium_bg)     AS calcium,
   COALESCE(ch.chloride_chem,    ab.chloride_bg)    AS chloride,
@@ -319,7 +326,9 @@ SELECT
   en.ggt,
   en.amylase,
   en.ck_cpk,
-  -- ck_mb: COALESCE cardiac_marker (lebih spesifik) > enzyme
+  
+  --prioritaskan CK-MB dari cardiac_marker
+  -- jika tidak tersedia, gunakan nilai dari enzyme
   COALESCE(car.ck_mb_cardiac, en.ck_mb_enzyme) AS ck_mb,
 
   -- ABG
@@ -331,12 +340,12 @@ SELECT
   ab.baseexcess,
   ab.pf_ratio,
 
-  -- ── fio2 multi-source COALESCE (v7) ──
-  -- Layer 1 (paling spesifik): ab.fio2_bg     (saat/dekat BGA)
-  -- Layer 2:                   vt.fio2_vent   (ventilator standalone)
+  -- prioritas sumber FiO2:
+  -- 1. Blood gas
+  -- 2. Ventilator setting
   --
-  -- mf0 A8 menjamin setiap stay punya ≥1 fio2 di salah satu Layer
-  -- (audit: 0 stays missing ALL sources). Hourly NaN di-handle Cell 4B.
+  -- Jika sumber pertama kosong,
+  -- otomatis gunakan sumber kedua.
   COALESCE(ab.fio2_bg, vt.fio2_vent) AS fio2,
 
   ab.totalco2,
@@ -349,7 +358,8 @@ SELECT
   car.troponin_t,
   car.ntprobnp
 
-FROM `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
+FROM 
+  `skripsi-sepsis-488003.sepsis_v3.hourly_backbone` b
 LEFT JOIN chem    ch  ON b.stay_id = ch.stay_id  AND b.hr = ch.hr
 LEFT JOIN cbc     cb  ON b.stay_id = cb.stay_id  AND b.hr = cb.hr
 LEFT JOIN diff    df  ON b.stay_id = df.stay_id  AND b.hr = df.hr
