@@ -1,43 +1,19 @@
 -- ============================================================
--- M8: FINAL DATASET ASSEMBLY
--- Dataset: MIMIC-IV v3.1
---
--- Gabungan M1–M7 — TANPA label (dikerjakan Python Cell 2)
--- Python akan tambahkan: has_shock, t_shock_onset, sample_weight
---
--- Kolom output:
---   Identifiers   : stay_id, subject_id, hadm_id, hr
---   Temporal      : starttime, endtime, icu_intime,
---                   effective_outtime
---   Label metadata: _label_t_sepsis_hr (BUKAN fitur model)
---   Vitals    (8) : heart_rate, sbp, dbp, map,
---                   resp_rate, temperature, spo2, glucose_poc
---   Chemistry (12): albumin, globulin, total_protein,
---                   aniongap, bun, creatinine, bicarbonate,
---                   calcium, chloride, glucose, sodium, potassium
---   CBC      (10) : hematocrit, hemoglobin, platelet, wbc,
---                   rdw, rdwsd, mcv, mch, mchc, rbc
---   Diff     (10) : neutrophils, lymphocytes, monocytes,
---                   eosinophils, basophils, bands,
---                   immature_granulocytes, atypical_lymphocytes,
---                   metamyelocytes, nrbc
---   Coagulation(6): inr, pt, ptt, d_dimer, fibrinogen, thrombin
---   Enzymes  (11) : ast, alt, bilirubin, bilirubin_direct,
---                   bilirubin_indirect, ld_ldh, alp, ggt,
---                   amylase, ck_cpk, ck_mb
---   ABG      (10) : lactate, ph, pco2, po2, so2, baseexcess,
---                   pf_ratio, fio2, totalco2, aado2
---   Inflam    (1) : crp
---   Cardiac   (2) : troponin_t, ntprobnp
---   GCS       (1) : gcs
---   Urine     (1) : urine_output
---   Static    (5) : age, gender, weight, height, bmi
---   Vasopressor   : vasopressor_active
---                   (HANYA untuk Python labeling —
---                    TIDAK masuk feature matrix model)
---
--- Fitur final ditentukan setelah coverage filter di Python
+-- mf8_final_dataset.sql
+-- Menggabungkan seluruh tabel menjadi dataset time-series akhir
+-- (1 baris = 1 ICU stay pada 1 jam)
 -- ============================================================
+
+-- Dataset ini berisi:
+-- - Informasi identitas dan waktu
+-- - Seluruh fitur klinis hasil ekstraksi (M2-M6)
+-- - Vasopressor untuk proses pelabelan di Python
+
+-- Label akhir dibentuk pada tahap preprocessing Python.
+
+CREATE OR REPLACE TABLE `skripsi-sepsis-488003.sepsis_v3.sepsis_hourly_dataset`
+CLUSTER BY stay_id, hr
+AS
 
 CREATE OR REPLACE TABLE `skripsi-sepsis-488003.sepsis_v3.sepsis_hourly_dataset`
 CLUSTER BY stay_id, hr
@@ -50,13 +26,13 @@ SELECT
   b.hadm_id,
   b.hr,
 
-  -- ── Temporal metadata ──
+  -- Temporal metadata
   b.starttime,
   b.endtime,
   b.icu_intime,
   b.effective_outtime,
 
-  -- ── Label metadata (BUKAN fitur model) ──
+  -- Label metadata (BUKAN fitur model)
   b._label_t_sepsis_hr,
 
   -- ── Vital signs ──
