@@ -1,6 +1,6 @@
 # Aplikasi CDSS (`cdss_apps/`)
 
-Prototipe *Clinical Decision Support System* untuk pemantauan risiko syok septik per jam pada pasien sepsis di ICU. Dibangun dengan Streamlit, menggunakan model TCN terlatih dengan inferensi berbasis *growing window*.
+Prototipe *Clinical Decision Support System* untuk pemantauan risiko syok septik per jam pada pasien sepsis di ICU. Dibangun menggunakan Streamlit dengan model **Temporal Convolutional Network (TCN)** dan inferensi berbasis *growing window*.
 
 ## Menjalankan Aplikasi
 
@@ -14,13 +14,13 @@ streamlit run app.py
 
 | File | Deskripsi |
 |---|---|
-| `app.py` | Entry point Streamlit — UI, routing antar halaman |
-| `inference.py` | Inferensi TCN, konstruksi sekuen, kategorisasi risiko |
-| `imputation.py` | Imputasi ffill/bfill per stay |
-| `validation.py` | Validasi rentang nilai fitur, FEATURE_DISPLAY |
-| `tcn_arch.py` | Definisi arsitektur TCN (PyTorch) |
+| `app.py` | Entry point Streamlit — UI dan routing antar halaman |
+| `inference.py` | Inferensi model TCN, konstruksi sekuen, dan kategorisasi risiko |
+| `imputation.py` | Imputasi data menggunakan interpolasi linear, *forward fill*, dan *backward fill* |
+| `validation.py` | Validasi nilai fitur, definisi rentang nilai, dan `FEATURE_DISPLAY` |
+| `tcn_arch.py` | Implementasi arsitektur TCN menggunakan PyTorch |
 | `generate_template.py` | Generator template Excel untuk input data |
-| `requirements.txt` | Dependensi Python |
+| `requirements.txt` | Daftar dependensi Python |
 
 ## Dependensi
 
@@ -35,7 +35,24 @@ streamlit run app.py
 
 ## Format Input
 
-Data diunggah dalam format `.xlsx` dengan kolom wajib: `stay_id`, `hr`, dan 21 kolom fitur. Template tersedia di sidebar aplikasi atau di `assets/templates/`. Batas maksimum: **20 pasien per file**.
+Data diunggah dalam format `.xlsx` dengan kolom wajib:
+
+- `stay_id`
+- `hr`
+- 21 fitur klinis hasil seleksi
+
+Template Excel dapat diunduh melalui sidebar aplikasi atau dari folder `assets/templates/`.
+
+**Batas maksimum:** **20 pasien** per file.
+
+## Validasi Nilai Klinis
+
+Sebelum dilakukan imputasi dan inferensi, seluruh fitur numerik divalidasi menggunakan dua jenis batas nilai:
+
+- **Rentang valid (*physiologically plausible range*)**, digunakan untuk mendeteksi nilai yang kemungkinan merupakan kesalahan pencatatan (*data quality control*) tanpa menghilangkan nilai ekstrem yang masih mungkin dijumpai pada pasien ICU.
+- **Rentang normal (*clinical reference range*)**, digunakan sebagai informasi referensi klinis yang ditampilkan kepada pengguna dan bukan sebagai dasar diagnosis.
+
+Rentang normal disusun berdasarkan referensi laboratorium klinis dan referensi *critical care*, sedangkan rentang valid ditetapkan secara konservatif agar hanya mengecualikan nilai yang secara fisiologis tidak masuk akal atau kemungkinan merupakan kesalahan input.
 
 ## Kategorisasi Risiko
 
@@ -45,25 +62,16 @@ Data diunggah dalam format `.xlsx` dengan kolom wajib: `stay_id`, `hr`, dan 21 k
 | Sedang | 30–60% |
 | Tinggi | > 60% |
 
-Threshold 60% ditetapkan via optimasi TS-CUS pada validation set (TCN).
+Threshold **60%** diperoleh melalui optimasi **TS-CUS** pada *validation set* model TCN.
 
-## Screenshots
+## Referensi
 
-| Halaman | Preview |
-|---|---|
-| Halaman utama | ![](../documentation/screenshots/01_halaman_utama.png) |
-| Unggah data | ![](../documentation/screenshots/02_unggah_data.png) |
-| Validasi | ![](../documentation/screenshots/03_validasi.png) |
-| Dashboard pasien tunggal | ![](../documentation/screenshots/04_dashboard_single.png) |
-| Kondisi pasien | ![](../documentation/screenshots/05_kondisi_pasien.png) |
-| Faktor utama (Shapley) | ![](../documentation/screenshots/06_faktor_utama.png) |
-| Dashboard multi-pasien | ![](../documentation/screenshots/07_dashboard_multi.png) |
-| Triase | ![](../documentation/screenshots/08_triase.png) |
+1. Bai, S., Kolter, J. Z., & Koltun, V. (2018). *An Empirical Evaluation of Generic Convolutional and Recurrent Networks for Sequence Modeling*. NeurIPS Workshop. https://arxiv.org/abs/1803.01271
 
-## Video Demo
+2. Pagana, K. D., Pagana, T. J., & Pagana, T. N. (2021). *Mosby's Diagnostic & Laboratory Test Reference* (15th ed.). Elsevier.
 
-[![Demo CDSS](../documentation/screenshots/01_halaman_utama.png)](../documentation/video/demo_cdss.mp4)
+3. National Center for Biotechnology Information. (2024). *Appendix A. Normal Laboratory Values*. In *Clinical Methods*. U.S. National Library of Medicine. https://www.ncbi.nlm.nih.gov/books/NBK613071/
 
-## Flowchart
+4. Bickley, L. S. (2021). *Bates' Guide to Physical Examination and History Taking* (13th ed.). Wolters Kluwer.
 
-![CDSS Flowchart](../documentation/flowchart/cdss_flowchart.png)
+5. Marino, P. L. (2024). *The ICU Book* (5th ed.). Wolters Kluwer.
