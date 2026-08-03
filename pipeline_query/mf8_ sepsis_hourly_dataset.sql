@@ -15,10 +15,6 @@ CREATE OR REPLACE TABLE `skripsi-sepsis-488003.sepsis_v3.sepsis_hourly_dataset`
 CLUSTER BY stay_id, hr
 AS
 
-CREATE OR REPLACE TABLE `skripsi-sepsis-488003.sepsis_v3.sepsis_hourly_dataset`
-CLUSTER BY stay_id, hr
-AS
-
 SELECT
   -- ── Identifiers ──
   b.stay_id,
