@@ -43,7 +43,3 @@ Bobot ditetapkan sebelum eksperimen. PLR dan FAR dihitung pada level pasien.
 | Transformer | 0.8824 | 0.7138 | 0.8165 | 0.2439 | 0.7675 | 0.70 |
 
 Model terbaik: **TCN**. *Checkpoint* tersimpan di `cdss_apps/assets/checkpoints/best_tcn.pt`.
-
-## Flowchart
-
-![Model Flowchart](../documentation/flowchart/model_flowchart.png)
