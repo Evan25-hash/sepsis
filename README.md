@@ -40,18 +40,6 @@ Model terbaik: **TCN** (TS-CUS tertinggi, threshold 0.60).
 
 Prototipe *Clinical Decision Support System* berbasis Streamlit. Lihat [`cdss_apps/README.md`](cdss_apps/README.md) untuk detail dan cara menjalankan.
 
-## Dokumentasi
-
-Flowchart teknis, screenshots antarmuka, dan video demo tersedia di [`documentation/`](documentation/).
-
-| Artefak | Lokasi |
-|---|---|
-| Flowchart pipeline data | [`documentation/flowchart/query_flowchart.png`](documentation/flowchart/query_flowchart.png) |
-| Flowchart pipeline model | [`documentation/flowchart/model_flowchart.png`](documentation/flowchart/model_flowchart.png) |
-| Flowchart aplikasi CDSS | [`documentation/flowchart/cdss_flowchart.png`](documentation/flowchart/cdss_flowchart.png) |
-| Screenshots aplikasi | [`documentation/screenshots/`](documentation/screenshots/) |
-| Video demo | [`documentation/video/demo_cdss.mp4`](documentation/video/demo_cdss.mp4) |
-
 ## Akses Data
 
 Dataset MIMIC-IV memerlukan sertifikasi CITI Program dan *credentialed access* melalui [PhysioNet](https://physionet.org/content/mimiciv/). Repositori ini tidak menyertakan data apapun.
